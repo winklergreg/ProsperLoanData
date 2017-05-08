@@ -1,0 +1,898 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+Prosper Loan Analysis by Gregory Winkler
+========================================================
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Packages required to run the code
+
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(GGally)
+library(stringr)
+library(scales)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Load_the_Data}
+
+# Read in csv file containing the data
+data <- read_csv("~/Documents/Udacity/eda_r/project/prosperLoanData.csv")
+loanData <- data
+
+# Read in FHLB Boston Rates
+historicalRates <- read_tsv("~/Documents/Udacity/eda_r/project/historical_rates.tsv",
+                            skip = 8, col_names = FALSE)
+historicalRates <- subset(historicalRates, select = -c(X4))
+colnames(historicalRates) <- c("Date", "Amort3y3y", "Amort5y5y")
+historicalRates$Date <- as.POSIXct(strptime(historicalRates$Date, 
+                                            "%m/%d/%Y", tz = 'GMT'))
+
+# Read in Bank of America ML OAS Spread
+BofAHighYieldOAS <- read_csv("~/Documents/Udacity/eda_r/project/BAMLH0A1HYBB.csv")
+BofAHighYieldOAS$DATE <- as.POSIXct(BofAHighYieldOAS$DATE, 
+                                                "%m/%d/%Y", tz = 'GMT')
+
+```
+
+This report explores approximately 114,000 Propser Loan Data for loans made from
+November 2005 to March 2014.  Prosper is a marketplace lending platform that 
+allows for peer to peer loans.
+
+# Univariate Plots Section
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Univariate_Plots}
+
+# Adjust some of the variables to be easier to work with
+loanData$IsBorrowerHomeowner <- factor(loanData$IsBorrowerHomeowner)
+loanData$Occupation <- factor(loanData$Occupation)
+loanData$EmploymentStatus <- factor(loanData$EmploymentStatus)
+loanData$LoanStatus <- factor(loanData$LoanStatus)
+loanData$CurrentlyInGroup <- factor(loanData$CurrentlyInGroup)
+loanData$IncomeVerifiable <- factor(loanData$IncomeVerifiable)
+loanData$Term <- factor(loanData$Term)
+loanData$IncomeRange <- factor(loanData$IncomeRange,
+                               levels = c("Not displayed","Not employed",
+                                         "$0","$1-24,999","$25,000-49,999",
+                                         "$50,000-74,999","$75,000-99,999",
+                                         "$100,000+"),
+                               ordered = TRUE)
+
+# Display structure of the dataset
+str(loanData, give.attr=FALSE, vec.len=3)
+summary(loanData)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Create buckets for grouping credit scores
+CreditBuckets <- c("(400,600]", "(600,650]", "(650,675]", "(675,700]", 
+                   "(700,725]", "(725,775]", "(775,900]")
+
+# Create a new variable in the main data set that will coincide with the buckets
+loanData$CreditScoreRanges <- cut(loanData$CreditScoreRangeLower, 
+                                  c(400, 600, 650, 675, 700, 725, 775, 900))
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Lower Credit Score for each borrower. Restrict the 
+# data to only include credit scores that exist and are over 400. 
+ggplot(subset(loanData, 
+              !is.na(CreditScoreRangeLower) & 
+                CreditScoreRangeLower > 400), 
+       aes(x = CreditScoreRangeLower)) + 
+  geom_histogram(binwidth = 10)
+
+# Display the mean and range of the credit score data
+summary(loanData$CreditScoreRangeLower)
+
+```
+
+The credit scores have a median of 680.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Borrower Rate
+ggplot(loanData, aes(x = BorrowerRate)) +
+  geom_histogram(binwidth = 0.005)
+
+# Display the mean and range of the borrower rates
+summary(loanData$BorrowerRate)
+
+```
+
+The borrower's interest rates have a normal distribution with the exception of a 
+significant number of loans around 0.33 (33%). 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a bar chart of the Income Range buckets
+ggplot(loanData, aes(x = IncomeRange)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 30))
+
+```
+
+The largest group of borrowers have incomes in the $25,000 to $74,999 Income 
+Ranges.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Debt-to-Income Ratios
+ggplot(loanData, aes(x = DebtToIncomeRatio)) +
+  geom_histogram(binwidth = 0.01) 
+
+# Display the mean and range of the Debt-to-Income Ratios
+summary(loanData$DebtToIncomeRatio)
+
+```
+
+The Debt-to-Income Ratio for most borrowers is reasonable with a mean around 0.27.
+However, there is a sizable number of borrowers over 10.  Such a high number 
+would be difficult to ever pay back. Taking a quick look at the IncomeRanges and 
+whether or not that income is verifiable shows that these borrowers are 
+predominantly low income and possibly may not be disclosing their true income.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Display the Income Range and Income Verification status of records with a 
+# debt-to-income greater than 10
+subset(loanData, DebtToIncomeRatio > 10) %>% 
+  group_by(IncomeRange, IncomeVerifiable) %>% 
+  summarise(n=n())
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Debt-to-Income Ratios, excluding the highest 1% values
+ggplot(loanData, aes(DebtToIncomeRatio)) +
+  geom_histogram(binwidth = 0.01) +
+  scale_x_continuous(limits = c(0, quantile(loanData$DebtToIncomeRatio, 0.99, 
+                                            na.rm = TRUE)))
+
+```
+
+Excluding the highest 1% of debt-to-income ratios, we see that the majority
+of borrowers are centered around 0.2.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Original Loan Amounts
+ggplot(loanData, aes(x = LoanOriginalAmount)) + 
+  geom_histogram(binwidth = 1000)
+
+# Display the mean and range of the Original Loan Amounts
+summary(loanData$LoanOriginalAmount)
+
+```
+
+Median loan amount is $6,500, but range from as low as $1,000 up to $35,000. 
+Amounts are most frequent in $5,000 intervals.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Monthly Loan Payments
+ggplot(loanData, aes(x = MonthlyLoanPayment)) +
+  geom_histogram(binwidth = 10) 
+
+# Display the mean and range of the Monthly Loan Payments
+summary(loanData$MonthlyLoanPayment)
+
+```
+
+Monthly loan payments are for the most part below $500. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the ratio of monthly loan payments to monthly stated income.
+# Exclude the highest 5% of values
+ggplot(loanData, aes(x = loanData$MonthlyLoanPayment / 
+                       loanData$StatedMonthlyIncome)) +
+  geom_histogram(binwidth = 0.0025) +
+  scale_x_continuous(limits = 
+                       c(0, quantile(loanData$MonthlyLoanPayment / 
+                                       loanData$StatedMonthlyIncome, 0.95, 
+                                     na.rm = TRUE))) +
+  xlab("Monthly Loan Payment / Stated Monthly Income")
+
+```
+
+Dividing the monthly loan payment by the borrower's stated monthly income, 
+we see that most borrowers have a monthly payment that is less than 5% of their 
+income.  However there is a significant right skew to this graph. I created this
+ratio because it stands to reason that borrowers paying a high amount of their 
+monthly income will struggle to repay their loan.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Bankcard Utilization rates
+ggplot(loanData, aes(x = BankcardUtilization)) +
+  geom_histogram(binwidth = 0.02) +
+  scale_x_continuous(limits = c(-0.1, 2))
+
+summary(loanData$BankcardUtilization)
+
+```
+
+Bankcard Utilization shows a large number of borrowers that have either used 
+none of their available credit or all of it.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Delinquencies in the last 7 years
+ggplot(loanData, aes(x = DelinquenciesLast7Years)) +
+  geom_histogram(binwidth = 1) +
+  scale_x_continuous(limits = c(0,50)) +
+  scale_y_continuous(limits = c(0,4000))
+
+# Display a count of records with and without delinquencies
+count(loanData, loanData$DelinquenciesLast7Years > 0)
+
+```
+
+Of the more than 36,000 borrowers that had delinquent accounts within the last 
+7 years on their credit report, the majority had less than 5.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Inquiries in the Last 6 Months
+ggplot(loanData, aes(x = InquiriesLast6Months)) +
+  geom_histogram(binwidth = 1) + 
+  scale_x_continuous(limits = c(-0.5, 20), breaks = seq(0,20,1))
+
+# Display a count of records with and without Inquiries in the Last 6 Months
+count(loanData, loanData$InquiriesLast6Months > 0)
+
+```
+
+Many of the borrowers did not have any credit inquiries in the 6 months leading
+up to their loans. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a histogram of the Loan Origination Dates
+ggplot(loanData, aes(x = LoanOriginationDate)) +
+  geom_histogram(bins = 180) 
+
+```
+
+Most of the loans were made in 2013 and 2014, the last 2 years of the data. Note
+the gap with no loans in late 2008 and first half of 2009. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a bar chart of the Term to maturity for each loan
+ggplot(loanData, aes(x = Term)) +
+  geom_bar()
+
+```
+
+The majority of of loans are short term at 36 months to maturity.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Create the text list of Listing Categories
+categories <- c('Not Available', 'Debt Consolidation', 'Home Improvement', 
+                'Business', 'Personal Loan', 'Student Use', 'Auto', 'Other', 
+                'Baby&Adoption', 'Boat', 'Cosmetic Procedure', 'Engagement Ring', 
+                'Green Loans', 'Household Expenses', 'Large Purchases', 
+                'Medical/Dental', 'Motorcycle', 'RV', 'Taxes', 'Vacation', 
+                'Wedding Loans')
+
+# Map the ListingCategory (numeric) column to create a new variable for the 
+# text version
+loanData$ListingCategory <- categories[loanData$`ListingCategory (numeric)` + 1]
+loanData$ListingCategory <- factor(loanData$ListingCategory)
+
+# Plot a bar chart of the text Listing Category
+ggplot(loanData, aes(x = ListingCategory)) + 
+  geom_bar() +
+  theme(axis.text.x = element_text(angle=30))
+
+```
+
+Debt Consolidation appears as the most frequent reason for borrowing.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a bar chart for the Loan Status  
+ggplot(loanData, aes(x = LoanStatus)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle=30))
+
+```
+
+The high charge-offs and defaulted loans in this dataset are worth taking a closer
+look at to see if there are any possible causes.  Separately, the high amount of 
+completed loans is expected given that the majority of loans are 36 months and 
+the dataset spans just shy of 10 years.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Create a subset of the top 15 states represented in th data
+topStates <- subset(loanData, !is.na(BorrowerState)) %>% 
+  group_by(BorrowerState) %>% 
+  summarise(n=n()) %>% 
+  arrange(desc(n)) %>% 
+  top_n(15)
+  
+# Plot a column chart of the top 15 states
+ggplot(topStates, aes(x = BorrowerState, y = n)) +
+  geom_col() + 
+  ylab("Count")
+
+```
+
+California leads the way with the most borrowers, with some of the other more 
+populated states trailing behind.
+
+# Univariate Analysis
+
+### Observations
+There are 113,937 loan records in the dataset with 81 variables about the borrower
+and their loan. Some of the key variables are the borrower rate, credit score, 
+debt-to-income ratio, bankcard utilization rate.
+
+* Most of the borrowers have a credit score of approximately 680. 
+* Median borrower rate is 0.184, but exhibits a right skew with a spike around 0.33.
+* Median debt-to-income ratio is 0.22.
+* Median bankcard utilization is 0.60 with most borrowers at 0 or 1.
+
+### Further Exploration
+I am interested in taking a closer look at the borrower's credit history to see 
+what relationships there may be with a borrower's interest rate. Based on some 
+of the plots we saw earlier, I would expect there to be a few variables that 
+explain some of the rate differentials.  Some variables that might contribute are
+the number of delinquencies, credit inquiries, debt-to-income ratio, and their 
+bankcard utilization rate.  Also, some of the qualitative variables will be 
+interesting to look at to see if they contributed to any disparity. For example, 
+does the borrower's geography or purpose of loan have a noticeable impact.  
+
+Also, this dataset provides an interesting time frame in that it includes loans
+made at the peak of the economic cycle (2006-2007) through one of the worst 
+financial collapses in recent history. I would expect defaults to be high in 2009 
+and 2010 as many people became unemployed.  
+
+The time period of this data should be an interesting factor as the financial 
+collapse in 2008-2009 resulted in many people losing their jobs and therefore 
+income.  I would expect defaults to be high in 2008 through 2010 as many people 
+became unemployed.
+
+### Data Adjustments
+I made some adjustment to the dataset. Sepecifically, I created a new variable 
+for the Listing Category to show what it is rather than a vague numerical value.
+Also, I created Credit Score Buckets to group credit scores for my analysis.
+
+# Bivariate Plots Section
+
+A quick look at a few of the variable relationships shows some meaningful 
+correlations with the borrower's credit score.  Also, the credit score appears 
+to have a fairly strong negative correlation with the borrower's rate as would 
+be expected.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=9, fig.height=9, Bivariate_Plots}
+
+# Create a new dataframe with key variables to explore further
+apr_factors_subset <- loanData %>% 
+  select(CreditScoreRangeLower, BorrowerRate, IncomeRange,
+         DebtToIncomeRatio, BankcardUtilization, CurrentDelinquencies, 
+         InquiriesLast6Months)
+
+# Create a matrix of graphs based on a few key variables
+set.seed(1000)
+ggpairs(apr_factors_subset[sample.int(nrow(apr_factors_subset), 5000),])
+
+```
+
+I quickly notice a couple of meaningful correlations for variables relative to 
+the borrower's credit score.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot the Bankcard Utilization rate against the Credit Scores
+ggplot(subset(loanData, !is.na(CreditScoreRanges) & BankcardUtilization < 1.5), 
+       aes(x = CreditScoreRanges, y = BankcardUtilization)) +
+  geom_boxplot() +
+  ggtitle("Bankcard Utilization by Credit Score Ranges") +
+  ylab("Bankcard Utilization") +
+  xlab("Credit Score Range") 
+
+```
+
+I took a subset of the data here to only include borrowers with a bankcard 
+utilization below 1.5.  We can see the correlation between the two variables 
+well here as the range and median of bankcard utilization rises as credit scores 
+decline.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a boxplot of bankcard utilization and income ranges
+ggplot(subset(loanData, BankcardUtilization < 1.5), 
+       aes(x = IncomeRange, y = BankcardUtilization)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 30))
+
+```
+
+Bankcard Utilization rises slightly with income.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+#Plot a bar chart for current delinquencies colored by Credit Score Range
+ggplot(subset(loanData, InquiriesLast6Months > 0 & !is.na(CreditScoreRanges)), 
+       aes(x = InquiriesLast6Months, color = CreditScoreRanges)) +
+  geom_bar(aes(fill=CreditScoreRanges)) +
+  scale_x_continuous(limits = c(0,16), breaks = seq(1,15,1)) +
+  ggtitle("Credit Inquiries in the Last 6 Months") +
+  ylab("Number of Loans")
+
+```
+
+Inquiries in the last 6 months do not appear as meaningful as I was expecting. 
+Typically 1 inquiry on a credit report will not cause a drop in a credit score. 
+However, borrowers with credit ratings over 700 still show up in the graph 
+around 5 inquiries.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+#Plot a bar chart for current delinquencies colored by Credit Score Range
+ggplot(subset(loanData, CurrentDelinquencies > 0 & !is.na(CreditScoreRanges)), 
+       aes(x = CurrentDelinquencies, color = CreditScoreRanges)) +
+  geom_bar(aes(fill=CreditScoreRanges)) +
+  scale_x_continuous(limits = c(0,16), breaks = seq(1,15,1)) +
+  ggtitle("Current Delinquent Accounts in Credit Report") +
+  ylab("Number of Loans") 
+
+```
+
+Higher current delinquencies tend to be associated with lower credit scores.  The
+majority of delinquencies are coming from borrowers with sub-700 credit scores.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a dot plot of DI-to-Income Ratio to Credit Scores
+ggplot(subset(loanData, DebtToIncomeRatio < 1.5 & CreditScoreRangeLower > 400), 
+       aes(x = CreditScoreRangeLower, y = DebtToIncomeRatio)) +
+  geom_jitter(alpha = 0.01) +
+  geom_smooth(method = 'lm', color = 'red') +
+  ggtitle("Debt-to-Income Ratio by Credit Score")
+
+```
+
+Debt-to-income shows normal distribution across credit scores and appears to 
+have no correlation.  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a bar chart of Loan Status with color for Credit Score buckets
+ggplot(subset(loanData, str_detect(LoanStatus, "Past Due")), 
+       aes(x = LoanStatus, color = CreditScoreRanges)) +
+  geom_bar(aes(fill=CreditScoreRanges)) +
+  ggtitle("Loans Past Due by Credit Score Range") +
+  theme(axis.text.x = element_text(angle = 30)) +
+  ylab("Number of Loans") 
+
+```
+
+Lower credit quality borrowers appear more likely to fall behind on 
+their payments.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a histogram of Defaulted Loans by Origination date and bucket by
+# Credit Score Range
+ggplot(subset(loanData, !is.na(CreditScoreRanges) & 
+                str_detect(LoanStatus, "Defaulted") & 
+                DebtToIncomeRatio < 1.1), 
+       aes(x = LoanOriginationDate, color = CreditScoreRanges)) +
+  geom_histogram(bins = 60, aes(fill=CreditScoreRanges), color='black') +
+  ggtitle("Defaulted Loans by Origination Date and Credit Score") +
+  ylab("Number of Defaulted Loans") +
+  xlab("Loan Origination Date")
+
+```
+
+Loan defaults were much greater in the time period leading up to the financial 
+crisis then afterwards.  The lower credit score borrowers clearly were more 
+likely to default prior to the crisis and again around 2011 and 2012.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot the Borrower Rate by Credit Score
+ggplot(subset(loanData, CreditScoreRangeLower > 400), 
+       aes(x = CreditScoreRangeLower, y = BorrowerRate)) +
+  geom_jitter(alpha = 0.05, size = 0.5) +
+  geom_smooth(method = 'lm', color = 'red') +
+  scale_y_sqrt() +
+  ggtitle("Borrower Rate by Credit Score") +
+  ylab("sqrt(Borrower Rate)") +
+  xlab("Credit Score")
+
+```
+
+Credit scores show some correlation with the borrower's interest rate with an 
+R^2^ of -0.46.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a boxplot of Listing Category and Borrower Rate
+ggplot(loanData, aes(x = ListingCategory, y = BorrowerRate)) +
+  geom_boxplot() + 
+  xlab("Listing Category") +
+  ylab("Borrowing Rate") +
+  ggtitle("Borrowing Rates by Loan Purpose") +
+  theme(axis.text.x = element_text(angle=30))
+
+```
+
+Loan purposes listed as Not Available have the greatest outliers. Cosmetic 
+procedures and Household expenses have the highest rates on average.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a bokxplot of Borrower State and Borrower Rate
+ggplot(subset(loanData, str_detect(BorrowerState, c(topStates$BorrowerState))), 
+       aes(x = BorrowerState, y = BorrowerRate)) +
+  geom_boxplot() + 
+  xlab("Borrower State") +
+  ylab("Borrowing Rate") +
+  ggtitle("Borrowing Rates by State")
+
+```
+
+Rates across the top 15 states by number of loans are fairly consistent. 
+
+# Bivariate Analysis
+
+### Observations
+It was interesting to note some of the variables that had a correlation with the
+credit score. As expected, the bankcard utilization, current delinquencies and 
+number of inquiries in the last 6 months all exhibited some correlation. However,
+I was a little surprised that the debt-to-income ratio showed no correlation. 
+While income may not factor into the credit score, I would have expected an 
+indirect relationship here where borrowers that have high debt-to-income are
+more likely to fall behind on payments and/or utilize a large portion of their 
+available credit.  
+
+Near the beginning of the analysis it was noted that a spike in borrowing rates
+was observed around 33%.  This appeared with some surprising results when graphed 
+against credit scores.  The data showed a negative correlation between credit 
+scores and borrower rates, but for the subset of data with rates around 33%
+showed a high concentration corresponding to borrowers with credit scores
+above what might be expected.  Based on the graph of the relationship, I would 
+not have expected many loan rates to coincide with credit scores over 700.
+
+The number of credit inquiries and current delinquencies both showed that a 
+higher occurrence in either was more likely to be associated with borrowers 
+having lower credit scores.
+
+
+Defaults were more frequent among low credit score borrowers which was to be 
+expected. However, the more interesting aspect of the graph was the impact that
+exogenious factors have on the repayment of a loan. While a credit score can 
+quantify a borrower's ability to repay their loan based on historical information,
+it is unable to anticipate future variants that can lead to unexpected results. 
+This is evident in the high frequency of defaults preceeding the 2008-2009 
+financial crisis when many people became unemployed. 
+
+The rise in borrower rates in 2011 through 2012 was interesting to note beause
+the FHLB Boston 3 year fully amortizing rate, a benchmark rate used by commercial 
+banks, stayed at very low levels during this period.  Since credit scores are
+representative of certain characteristic traits, it means that either lenders
+were demanding a higher risk premium or borrowers were taking loans out for 
+longer terms.
+
+
+The strongest relationship in the data I explored was the Credit Score and the 
+Borrower's Rate with a R^2^ of -0.46. The Bankcard Utilization rate and the Credit 
+Scores was not significantly different though with a R^2^ of -0.40. Also, Current 
+Delinquencies and Credit Inquiries showed some correlation with Credit Scores.
+
+# Multivariate Plots Section
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, Multivariate_Plots}
+
+#Plot a dotplot of Credit Scores and Borrower rate with colro for Bankcard Utilization 
+ggplot(subset(loanData, CreditScoreRangeLower > 400 & BankcardUtilization < 1.1), 
+       aes(x = CreditScoreRangeLower, y = BorrowerRate, color = BankcardUtilization)) +
+  geom_jitter() 
+
+```
+
+In general, a higher bankcard utilization rate corresponds with lower credit 
+scores and higher interest rates.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+ggplot(subset(loanData, CreditScoreRangeLower > 400 & 
+                BankcardUtilization < 1.1 & 
+                str_detect(LoanStatus, 'Past Due')==TRUE), 
+       aes(x = CreditScoreRangeLower, y = BorrowerRate, 
+           color = BankcardUtilization)) +
+  geom_jitter() +
+  ggtitle("Loans Past Due")
+
+```
+
+Loans that are past due tend to be higher rates and borrowers that have low
+credit scores and high bankcardutilization.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a histogram of loans with rates between 31% and 34% having a credit score
+# over 700
+ggplot(subset(loanData, CreditScoreRangeLower > 700 & BorrowerRate > 0.31 &
+                BorrowerRate < 0.34), 
+       aes(x = LoanOriginationDate, color = CreditScoreRanges)) +
+  geom_histogram(bins = 60, aes(fill=CreditScoreRanges)) +
+  ylab("Number of Loans") +
+  ggtitle("Loans with Borrower Rates between 31% and 34%")
+
+```
+
+Graphing only the loans with interest rates between 31% and 34% having a credit
+score greater than 700, we see that these loans were almost entirely originated
+in 2011 and 2012.  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Group and get the median rate by Credit Score and Loan Origination Date
+RatesByDayAndCredit <- loanData %>% 
+  group_by(LoanOriginationDate, CreditScoreRanges) %>% 
+  filter(!is.na(CreditScoreRanges)) %>% 
+  summarise(medianRate = median(BorrowerRate),
+            n = n())
+
+colnames(RatesByDayAndCredit)[1] <- c("Date")
+
+# Add external interest rate data to the dataframe
+RatesByDayAndCredit <- left_join(RatesByDayAndCredit, historicalRates)
+RatesByDayAndCredit <- left_join(RatesByDayAndCredit, BofAHighYieldOAS,
+                                 c("Date" = "DATE"))
+colnames(RatesByDayAndCredit)[7] <- c("BofA_HY_OAS")
+
+# Plot a smoothed line graph of the median borrowing rate by credit score range
+ggplot(RatesByDayAndCredit, 
+       aes(x = Date, y = medianRate, color = CreditScoreRanges)) +
+  geom_smooth() +
+  geom_smooth(aes(x = Date, y = Amort3y3y / 100, color = 'FHLB 3y Rate')) +
+  geom_smooth(aes(x = Date, y = (BofA_HY_OAS + Amort3y3y) / 100, 
+                  color = '3 Yr Rate + BofA HY BB OAS')) 
+
+```
+
+Graphing the median borrowing rates over time, we see that interest rates started
+rising in 2010 and remained elevated through most of 2012. Meanwhile the FHLB
+Boston 3 year amortizing rate, a lending benchmark rate, remained at very low 
+levels.
+
+There is a slight increase in the credit risk premium in 2011 that may explain 
+some of the rise in borrower rates observed. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a smoothed line of loans per day by credit score
+ggplot(RatesByDayAndCredit, aes(x = Date, y = n)) +
+  geom_smooth(aes(color = CreditScoreRanges)) + 
+  ggtitle("Number of Loans per day by Credit Score") +
+  ylab("Number of Loans") +
+  xlab("Loan Origination Date")
+
+```
+
+Separately we see a significant increase in loans to borrowers with 675 to 700
+credit scores starting in 2011 and increasing at a significantly faster pace in
+2013.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a dotplot of loan origination date and borrower rate, with color for
+# Credit scores and separate graphs for each term
+ggplot(subset(loanData, !is.na(CreditScoreRanges)), 
+              aes(x = LoanOriginationDate, y = BorrowerRate, 
+                  color = CreditScoreRanges)) +
+  geom_jitter(alpha = 0.5) +
+  facet_wrap(~Term)
+
+```
+
+It appears that 12 and 60 month loans are new to Prosper starting around 2011. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a dotplot as the previous one but with only credit scores between 
+# 700 and 775
+ggplot(subset(loanData, CreditScoreRangeLower > 700 & 
+                CreditScoreRangeLower <= 775), 
+       aes(x = LoanOriginationDate, y = BorrowerRate, 
+           color = CreditScoreRanges)) +
+  geom_jitter(alpha = 0.5) +
+  facet_wrap(~Term)
+
+```
+
+There has been an increase in 60 month term loans for borrowers with credit 
+scores ranging from 700 to 775.  However, the concentration around the 33% 
+interest rate looks to be 36 month loans. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# Plot a histogram of the loan originations with their term
+ggplot(subset(loanData, LoanOriginationDate > "2011-01-01"), 
+              aes(x = LoanOriginationDate, color= Term)) +
+  geom_histogram(aes(fill = Term), bins = 60)
+
+```
+
+The 60 month loans do not make a noticable increase until 2012.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a density graph of bankcard utilization with credit scores and income range
+ggplot(subset(loanData, CreditScoreRangeLower > 700 & 
+                CreditScoreRangeLower <= 775 &
+                BorrowerRate > 0.31 & BorrowerRate < 0.34), 
+       aes(x = BankcardUtilization, color = CreditScoreRanges)) +
+  geom_density() +
+  facet_wrap(~IncomeRange) +
+  ggtitle("Bankcard Utilization of Borrowers with Rates between 31% and 34%")
+
+
+```
+
+For the selected range of credit scores, it does appear that bankcard utilization
+for higher income borrowers may be a contributing factor for the higher rates.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Plot a density graph of debt-to-income with credit scores and income range
+ggplot(subset(loanData, CreditScoreRangeLower > 700 & 
+                CreditScoreRangeLower <= 775 & BorrowerRate > 0.31 & 
+                BorrowerRate < 0.34 & DebtToIncomeRatio < 1.1), 
+       aes(x = DebtToIncomeRatio, color = CreditScoreRanges)) +
+  geom_density() +
+  facet_wrap(~IncomeRange) +
+  ggtitle("Debt-to-Income of Borrowers with Rates between 31% and 34%")
+
+
+```
+
+Whereas higher debt-to-income may be more likely a contributing factor for lower 
+income borrowers.
+
+# Multivariate Analysis
+
+### Observations
+
+The median interest rates of the credit score ranges over the relevent period 
+was insightful to provide a possible reason for why the data did not necessarily
+fit as well with other variables as I might have expected. Considering many of 
+these borrowers are high risk, I would not be surprised if the increase in 
+overall borrower rates during 2011 was from lenders being more conservative and
+expecting a higher return.  
+
+While bankcard utilization varied greatly, in general it was noticeably higher 
+for loans that had a low credit score and high interest rate.  Also, it looks to 
+be a contributing factor to loans that are currently past due. This was inline 
+with my expectations as these borrowers were most likely already struggling with 
+repaying their debt.
+
+As interest rate declined in 2013 and 2014, borrowers took advantage of the 60
+month term option in increasing numbers.  
+
+### Interesting Interactions between Features
+
+It was interesting to see that for the interest rates between 31% and 34% of 
+higher credit score borrowers, bankcard utilization had a bigger factor for 
+higher income borrowers.  This was in contrast to debt-to-income that appeared
+to be more influential for lower income borrowers.  
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+```{r echo=FALSE, message=FALSE, warning=FALSE, Plot_One}
+
+ggplot(subset(loanData, !is.na(CreditScoreRanges) & 
+                str_detect(LoanStatus, "Defaulted") & 
+                DebtToIncomeRatio < 1.1), 
+       aes(x = LoanOriginationDate, color = CreditScoreRanges)) +
+  geom_histogram(bins = 60, aes(fill=CreditScoreRanges), color='black') +
+  ggtitle("Defaulted Loans by Origination Date and Credit Score") +
+  ylab("Number of Defaulted Loans") +
+  xlab("Loan Origination Date")
+
+```
+
+### Description One
+
+The difference in number of defaulted loans before and after the financial crisis
+was very interesting.  This shows how our models and research can only provide
+insight on what we can expect based on historical examples.
+
+### Plot Two
+```{r echo=FALSE, message=FALSE, warning=FALSE, Plot_Two}
+
+ggplot(subset(loanData, CreditScoreRangeLower > 400), 
+       aes(x = CreditScoreRangeLower, y = BorrowerRate)) +
+  geom_jitter(alpha = 0.05, size = 0.5) +
+  geom_smooth(method = 'lm', color = 'red') +
+  scale_y_sqrt(labels = percent) +
+  ggtitle("Borrower Rate by Credit Score") +
+  ylab("sqrt(Borrower Rate)") +
+  xlab("Credit Score")
+
+```
+
+### Description Two
+
+The correlation between credit scores and borrower rates shows that there is a 
+negative correlation between the two.  This makes sense as we would expect that 
+the reason for the borrower's low credit score is that they would be more likely 
+to not pay back their loan in full.
+
+### Plot Three
+```{r echo=FALSE, message=FALSE, warning=FALSE, Plot_Three}
+
+ggplot(RatesByDayAndCredit, 
+       aes(x = Date, y = medianRate, color = CreditScoreRanges)) +
+  geom_smooth() +
+  geom_smooth(aes(x = Date, y = Amort3y3y / 100, color = 'FHLB 3y Rate')) +
+  geom_smooth(aes(x = Date, y = (BofA_HY_OAS + Amort3y3y) / 100, 
+                  color = '3 Yr Rate + BofA HY BB OAS')) +
+  scale_y_continuous(labels = percent) +
+  ylab("Median Borrower Rate") +
+  ggtitle("Median Rate by Credit Score over the Sample Period")
+
+```
+
+### Description Three
+
+The median interest rates by credit score over time provide a couple of useful
+pieces of information. The show that lower credit borrowers are likely to have
+higher interest rates at any given point in time. Additionally, they show that 
+during time periods of higher risk, these low credit borrowers may see larger 
+differentials in pricing from other borrowers.
+
+------
+
+# Reflection
+
+The Prosper dataset was interesting to explore as there was information about 
+the borrower's historical experience with debt and also their current loan and
+its repayment performance.  It was relatively easy to work with the data as 
+most of it was already in a workable format.  However, there were a few 
+variables that I found helpful to factor first to make them easier to work with.
+
+It was interesting to bring in external interest rate data into the dataset. The
+Prosper data provided a lot of interesting information but there were a couple 
+of times that I thought a stronger relationship should have existed but did not. 
+Understanding the general interest rate market conditions helped to guide further
+exploration.  This was most helpful with exploring the large spike in loan rates
+around 33%.  
+
+In the future, I think the analysis could be expanded to try to predict interest
+rates on new loans.  I think there is enough information from the propser data
+that when combined with general market yield curves, it could come close to 
+providing some prediction on where new loans would be given a set of borrower
+characteristics.  However, Prosper's business model likely makes this a little 
+more difficult in that at any point in time there could be an imbalance of 
+borrowers and lenders since the business is not universally known as a typical
+bank would be.  
+
+
+### Additional data sources
+
+1. FHLB Boston Rates: http://www.fhlbboston.com/rates/historicalrates/index.jsp
+2. Bank of America Merrill Lynch OAS: https://fred.stlouisfed.org/series/BAMLH0A1HYBB
